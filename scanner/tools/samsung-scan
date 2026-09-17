@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#
+# samsung-scan - CLI and GUI launcher for Samsung Xpress M2071 / M2070 Scanner
+# macOS Apple Silicon (arm64)
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Search locations for components
+find_file() {
+    for path in "$@"; do
+        if [ -e "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    echo ""
+}
+
+NATIVE_APP=$(find_file "$SCRIPT_DIR/../Samsung Scanner.app" \
+                       "$SCRIPT_DIR/Samsung Scanner.app" \
+                       "/Applications/Samsung Scanner.app")
+
+ENGINE_BIN=$(find_file "$SCRIPT_DIR/../bin/samsung-scan-engine" \
+                       "$SCRIPT_DIR/bin/samsung-scan-engine" \
+                       "$SCRIPT_DIR/../scanner/bin/samsung-scan-engine" \
+                       "/Applications/Samsung Scanner.app/Contents/MacOS/samsung-scan-engine" \
+                       "/Library/Printers/Samsung/Scanner/samsung-scan-engine" \
+                       "$(command -v samsung-scan-engine 2>/dev/null || true)")
+
+WEB_SCRIPT=$(find_file "$SCRIPT_DIR/../samsung-scan-web.py" \
+                       "$SCRIPT_DIR/samsung-scan-web.py" \
+                       "$SCRIPT_DIR/../scanner/samsung-scan-web.py" \
+                       "/Applications/Samsung Scanner.app/Contents/Resources/samsung-scan-web.py" \
+                       "/Library/Printers/Samsung/Scanner/samsung-scan-web.py")
+
+launch_gui() {
+    if [ -n "$NATIVE_APP" ]; then
+        echo "==> Launching native Apple Silicon Samsung Scanner App..."
+        open "$NATIVE_APP"
+    else
+        echo "Error: Samsung Scanner.app not found. Please build or install the scanner suite: cd scanner && make all" >&2
+        exit 1
+    fi
+}
+
+# If no arguments provided, default to launching the GUI
+if [ $# -eq 0 ]; then
+    launch_gui
+    exit 0
+fi
+
+case "$1" in
+    --gui)
+        shift
+        launch_gui "$@"
+        ;;
+    --web)
+        shift
+        if [ -n "$WEB_SCRIPT" ]; then
+            exec /usr/bin/python3 "$WEB_SCRIPT" "$@"
+        else
+            echo "Error: Samsung Scanner Web script not found." >&2
+            exit 1
+        fi
+        ;;
+    *)
+        if [ -n "$ENGINE_BIN" ]; then
+            exec "$ENGINE_BIN" "$@"
+        else
+            echo "Error: samsung-scan-engine executable not found. Run 'make all' or 'sudo ./install.sh'." >&2
+            exit 1
+        fi
+        ;;
+esac

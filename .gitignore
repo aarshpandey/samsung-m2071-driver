@@ -1,0 +1,25 @@
+# Build & Distribution Artifacts
+bin/
+dist/
+*.o
+*.dylib
+*.a
+*.dSYM/
+
+# Compiled App Bundle Binaries & Signatures (keep Info.plist & AppIcon.icns in git)
+**/Samsung Scanner.app/Contents/MacOS/
+**/Samsung Scanner.app/Contents/_CodeSignature/
+
+# Temporary test outputs
+/tmp/samsung_*
+test_output/
+*.qpdl
+*.ppm
+scan.pdf
+test_scan.pdf
+
+# macOS metadata
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes

@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# samsung-print - Helper CLI utility for Samsung Xpress M2070 / M2071 Series
+# Native Apple Silicon (arm64) macOS Driver Utility
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+FILTER_BIN="$BASE_DIR/bin/rastertoqpdl"
+SYS_FILTER="/Library/Printers/Samsung/Filter/rastertoqpdl"
+PPD_M2071="$BASE_DIR/ppd/Samsung-Xpress-M2071.ppd"
+SYS_PPD="/Library/Printers/PPDs/Contents/Resources/Samsung-Xpress-M2071.ppd"
+
+show_help() {
+    cat << 'EOF'
+Usage: samsung-print [OPTIONS] <input-file>
+
+Convenient print & conversion tool for Samsung Xpress M2070 / M2071 on Apple Silicon.
+
+Options:
+  -p, --printer <name>     Specify CUPS destination printer (default: auto-detect)
+  -o, --output <file.qpdl> Convert input document directly to a Samsung QPDL stream
+  -r, --raw                Send pre-rendered QPDL stream directly to printer
+  -c, --copies <num>       Number of copies (default: 1)
+  -s, --status             Show Samsung printer status and queue info
+  -h, --help               Show this help message
+
+Examples:
+  samsung-print invoice.pdf
+  samsung-print -c 2 document.txt
+  samsung-print -o document.qpdl document.pdf
+  samsung-print -r document.qpdl
+EOF
+}
+
+# Determine which filter and PPD to use
+ACTIVE_FILTER=""
+if [ -x "$SYS_FILTER" ]; then
+    ACTIVE_FILTER="$SYS_FILTER"
+elif [ -x "$FILTER_BIN" ]; then
+    ACTIVE_FILTER="$FILTER_BIN"
+fi
+
+ACTIVE_PPD=""
+if [ -f "$SYS_PPD" ]; then
+    ACTIVE_PPD="$SYS_PPD"
+elif [ -f "$PPD_M2071" ]; then
+    ACTIVE_PPD="$PPD_M2071"
+fi
+
+detect_printer() {
+    local p
+    p=$(lpstat -p 2>/dev/null | grep -i "Samsung" | awk '{print $2}' | head -n 1)
+    if [ -z "$p" ]; then
+        p=$(lpstat -d 2>/dev/null | awk -F': ' '{print $2}')
+    fi
+    echo "$p"
+}
+
+PRINTER=""
+OUTPUT_FILE=""
+RAW_MODE=0
+COPIES=1
+INPUT_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -p|--printer)
+            PRINTER="$2"
+            shift 2
+            ;;
+        -o|--output)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        -r|--raw)
+            RAW_MODE=1
+            shift
+            ;;
+        -c|--copies)
+            COPIES="$2"
+            shift 2
+            ;;
+        -s|--status)
+            echo "=== Samsung Printer Status ==="
+            lpstat -p -d -v 2>/dev/null || echo "No printers found."
+            exit 0
+            ;;
+        *)
+            if [ -z "$INPUT_FILE" ]; then
+                INPUT_FILE="$1"
+                shift
+            else
+                echo "Error: Unknown argument '$1'" >&2
+                show_help
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+if [ -z "$INPUT_FILE" ]; then
+    echo "Error: No input file specified." >&2
+    show_help
+    exit 1
+fi
+
+if [ ! -f "$INPUT_FILE" ]; then
+    echo "Error: Input file '$INPUT_FILE' not found." >&2
+    exit 1
+fi
+
+# Mode 1: Convert to QPDL stream
+if [ -n "$OUTPUT_FILE" ]; then
+    if [ -z "$ACTIVE_FILTER" ]; then
+        echo "Error: rastertoqpdl filter binary not found. Run 'make' first." >&2
+        exit 1
+    fi
+    echo "==> Converting '$INPUT_FILE' to Samsung QPDL: '$OUTPUT_FILE'..."
+    TMP_RASTER=$(mktemp /tmp/samsung_raster.XXXXXX)
+    trap 'rm -f "$TMP_RASTER"' EXIT
+
+    # Convert document to CUPS raster using macOS CoreGraphics pipeline
+    cupsfilter -m application/vnd.cups-raster -p "$ACTIVE_PPD" "$INPUT_FILE" > "$TMP_RASTER" 2>/dev/null
+    
+    # Run the native ARM64 QPDL filter
+    PPD="$ACTIVE_PPD" "$ACTIVE_FILTER" 1 "$USER" "$(basename "$INPUT_FILE")" "$COPIES" "" "$TMP_RASTER" > "$OUTPUT_FILE"
+    echo "==> Done! Generated $(wc -c < "$OUTPUT_FILE" | tr -d ' ') bytes QPDL stream in '$OUTPUT_FILE'."
+    exit 0
+fi
+
+# Mode 2: Print directly to CUPS queue
+TARGET_PRINTER="${PRINTER:-$(detect_printer)}"
+
+if [ -z "$TARGET_PRINTER" ]; then
+    echo "Error: No Samsung printer queue detected." >&2
+    echo "Run './install.sh' to install the driver and configure your printer queue." >&2
+    exit 1
+fi
+
+if [ "$RAW_MODE" -eq 1 ]; then
+    echo "==> Sending raw QPDL file '$INPUT_FILE' to printer '$TARGET_PRINTER'..."
+    lp -d "$TARGET_PRINTER" -o raw -n "$COPIES" "$INPUT_FILE"
+else
+    echo "==> Sending '$INPUT_FILE' to printer '$TARGET_PRINTER' ($COPIES copies)..."
+    lp -d "$TARGET_PRINTER" -n "$COPIES" "$INPUT_FILE"
+fi
+
+echo "==> Job submitted successfully!"
