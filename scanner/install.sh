@@ -28,6 +28,25 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo bash "$0" "$@"
 fi
 
+# Check dependencies (libusb is required to compile the native scanner engine)
+if [ ! -f "$SCRIPT_DIR/deps/lib/libusb-1.0.a" ] || [ ! -f "$SCRIPT_DIR/deps/include/libusb.h" ]; then
+    BREW_BIN=$(which brew 2>/dev/null || ([ -x /opt/homebrew/bin/brew ] && echo /opt/homebrew/bin/brew) || ([ -x /usr/local/bin/brew ] && echo /usr/local/bin/brew))
+    if [ ! -f "/opt/homebrew/include/libusb-1.0/libusb.h" ] && [ ! -f "/usr/local/include/libusb-1.0/libusb.h" ]; then
+        echo "==> Dependency 'libusb' not detected. Attempting to install via Homebrew..."
+        if [ -n "$BREW_BIN" ] && [ -x "$BREW_BIN" ]; then
+            if [ -n "$SUDO_USER" ]; then
+                sudo -u "$SUDO_USER" "$BREW_BIN" install libusb
+            else
+                "$BREW_BIN" install libusb
+            fi
+        else
+            echo "Error: 'libusb' is required to compile the scanner engine." >&2
+            echo "Please install Homebrew (https://brew.sh) and run: brew install libusb" >&2
+            exit 1
+        fi
+    fi
+fi
+
 # Step 1: Compile native Apple Silicon scanner engine
 echo "==> [1/4] Building native ARM64 scanner engine..."
 make -C "$SCRIPT_DIR" all

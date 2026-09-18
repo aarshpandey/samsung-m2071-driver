@@ -4,8 +4,18 @@
 CXX ?= clang++
 SWIFTC ?= swiftc
 ARCH ?= -arch arm64
-LIBUSB_INC ?= -I/opt/homebrew/include/libusb-1.0
-LIBUSB_LIB ?= /opt/homebrew/lib/libusb-1.0.a
+SCRIPT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+VENDOR_LIB := $(SCRIPT_DIR)/deps/lib/libusb-1.0.a
+VENDOR_INC := -I$(SCRIPT_DIR)/deps/include
+
+ifneq ($(wildcard $(VENDOR_LIB)),)
+    LIBUSB_INC ?= $(VENDOR_INC)
+    LIBUSB_LIB ?= $(VENDOR_LIB)
+else
+    BREW_PREFIX ?= $(shell brew --prefix 2>/dev/null || ([ -d /opt/homebrew ] && echo /opt/homebrew || echo /usr/local))
+    LIBUSB_INC ?= $(shell [ -d "$(BREW_PREFIX)/include/libusb-1.0" ] && echo "-I$(BREW_PREFIX)/include/libusb-1.0" || echo "-I/opt/homebrew/include/libusb-1.0")
+    LIBUSB_LIB ?= $(shell [ -f "$(BREW_PREFIX)/lib/libusb-1.0.a" ] && echo "$(BREW_PREFIX)/lib/libusb-1.0.a" || echo "/opt/homebrew/lib/libusb-1.0.a")
+endif
 
 CXXFLAGS ?= -O3 -std=c++14 $(ARCH) $(LIBUSB_INC) -Isrc -Wall -Wno-deprecated-declarations
 LDFLAGS ?= $(ARCH) $(LIBUSB_LIB) -framework IOKit -framework CoreFoundation -framework Security -framework CoreGraphics -framework ImageIO -lobjc

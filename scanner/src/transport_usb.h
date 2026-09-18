@@ -2,7 +2,17 @@
 #define TRANSPORT_USB_H
 
 #include "transport.h"
-#include <libusb.h>
+#if defined(__has_include)
+  #if __has_include(<libusb-1.0/libusb.h>)
+    #include <libusb-1.0/libusb.h>
+  #elif __has_include(<libusb.h>)
+    #include <libusb.h>
+  #else
+    #include <libusb.h>
+  #endif
+#else
+  #include <libusb.h>
+#endif
 #include <vector>
 
 struct USBDeviceInfo {

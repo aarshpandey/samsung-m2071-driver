@@ -4,6 +4,7 @@ dist/
 *.o
 *.dylib
 *.a
+!scanner/deps/**/*.a
 *.dSYM/
 
 # Compiled App Bundle Binaries & Signatures (keep Info.plist & AppIcon.icns in git)
