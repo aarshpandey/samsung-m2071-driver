@@ -76,7 +76,7 @@ inline void Algo0x0E::addLiteralSequence(
 
     /* Pad with required blanks. */
     for(w=0;w<blanks;w++){
-        data[outputSize++] = 0xff;
+        output[outputSize++] = 0xff;
     }
 }
 

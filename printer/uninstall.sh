@@ -16,7 +16,7 @@ echo " Samsung Xpress M2071 / M2070 Printer Driver Uninstaller    "
 echo "============================================================"
 
 # Remove CUPS print queues
-for queue in "Samsung_Xpress_M2071" "Samsung_Xpress_M2070" "Samsung_M2071" "Samsung_M2070"; do
+for queue in "Samsung_Xpress_M2071" "Samsung_Xpress_M2070" "Samsung_M2071" "Samsung_M2070" "Samsung_M2070_Series"; do
     if lpstat -p "$queue" >/dev/null 2>&1; then
         echo "==> Removing CUPS queue '$queue'..."
         lpadmin -x "$queue" 2>/dev/null || true

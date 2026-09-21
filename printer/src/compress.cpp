@@ -234,8 +234,9 @@ static bool _compressBandedPage(const Request& request, Page* page)
                     for (unsigned int x=0; (x < lineWidthInB - hardMarginXInB) && (x < bandWidthInB); x++) {
                         band[x + y * bandWidthInB] = planes[i][index + x + hardMarginXInB + y * lineWidthInB];
                     }
+                    // BUG-1 fix: row stride must be bandWidthInB, not lineWidthInB
                     for (unsigned int x=lineWidthInB - hardMarginXInB; x < bandWidthInB; x++)
-                        band[x + y * lineWidthInB]  = 0;
+                        band[x + y * bandWidthInB] = 0;
                 }
             }
 

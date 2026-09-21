@@ -69,14 +69,36 @@ Band::~Band()
  * Mise sur disque / Rechargement
  * Swapping / restoring
  */
+static bool safe_write(int fd, const void *buf, size_t count) {
+    const char *p = (const char *)buf;
+    while (count > 0) {
+        ssize_t ret = write(fd, p, count);
+        if (ret <= 0) return false;
+        p += ret;
+        count -= (size_t)ret;
+    }
+    return true;
+}
+
+static bool safe_read(int fd, void *buf, size_t count) {
+    char *p = (char *)buf;
+    while (count > 0) {
+        ssize_t ret = read(fd, p, count);
+        if (ret <= 0) return false;
+        p += ret;
+        count -= (size_t)ret;
+    }
+    return true;
+}
+
 bool Band::swapToDisk(int fd)
 {
-    write(fd, &_bandNr, sizeof(_bandNr));
-    write(fd, &_colors, sizeof(_colors));
-    write(fd, &_width, sizeof(_width));
-    write(fd, &_height, sizeof(_height));
+    if (!safe_write(fd, &_bandNr, sizeof(_bandNr))) return false;
+    if (!safe_write(fd, &_colors, sizeof(_colors))) return false;
+    if (!safe_write(fd, &_width, sizeof(_width))) return false;
+    if (!safe_write(fd, &_height, sizeof(_height))) return false;
     for (unsigned int i=0; i < _colors; i++)
-        if (!_planes[i]->swapToDisk(fd))
+        if (!_planes[i] || !_planes[i]->swapToDisk(fd))
             return false;
     return true;
 }
@@ -87,10 +109,13 @@ Band* Band::restoreIntoMemory(int fd)
     Band* band;
 
     band = new Band();
-    read(fd, &band->_bandNr, sizeof(band->_bandNr));
-    read(fd, &colors, sizeof(colors));
-    read(fd, &band->_width, sizeof(band->_width));
-    read(fd, &band->_height, sizeof(band->_height));
+    if (!safe_read(fd, &band->_bandNr, sizeof(band->_bandNr)) ||
+        !safe_read(fd, &colors, sizeof(colors)) ||
+        !safe_read(fd, &band->_width, sizeof(band->_width)) ||
+        !safe_read(fd, &band->_height, sizeof(band->_height))) {
+        delete band;
+        return NULL;
+    }
     for (unsigned int i=0; i < colors; i++) {
         BandPlane *plane = BandPlane::restoreIntoMemory(fd);
         if (!plane) {

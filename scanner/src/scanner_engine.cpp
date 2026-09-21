@@ -48,11 +48,19 @@ static const int INQ_DPI_BITS[] = {
 };
 
 ScannerEngine::ScannerEngine(ITransport *transport)
-    : _io(transport), _cancelled(false)
+    : _io(transport), _cancelled(false), _external_cancel(nullptr)
 {
 }
 
 ScannerEngine::~ScannerEngine() {
+}
+
+void ScannerEngine::set_cancel_flag(std::atomic<bool> *flag) {
+    _external_cancel = flag;
+}
+
+bool ScannerEngine::is_cancelled() const {
+    return _cancelled.load() || (_external_cancel && _external_cancel->load());
 }
 
 void ScannerEngine::cancel() {
@@ -170,7 +178,7 @@ bool ScannerEngine::send_cmd_wait(uint8_t cmd_code, uint8_t *resp, size_t resple
     int sleep_ms = 50;
 
     while (elapsed_ms < timeout_sec * 1000) {
-        if (_cancelled) return false;
+        if (is_cancelled()) return false;
 
         if (!_io->send_cmd(cmd, 4)) {
             return false;
@@ -370,7 +378,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
         return false;
     }
 
-    if (_cancelled) {
+    if (is_cancelled()) {
         abort_and_release();
         return false;
     }
@@ -382,7 +390,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
         return false;
     }
 
-    if (_cancelled) {
+    if (is_cancelled()) {
         abort_and_release();
         return false;
     }
@@ -396,7 +404,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
     out_img.height = 0; // will count scanned lines
     out_img.dpi = params.dpi;
     out_img.channels = channels;
-    out_img.bits_per_channel = 8;
+    out_img.bits_per_channel = (params.mode == ScanMode::LineArt) ? 1 : 8;
     out_img.data.clear();
 
     // Step 4: Block read loop
@@ -406,14 +414,14 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
 
     std::vector<uint8_t> block_buffer;
 
-    while (!final_block && !_cancelled) {
+    while (!final_block && !is_cancelled()) {
         // Query next block status (poll until ready or timeout)
         bool block_ready = false;
         int sleep_ms = 20;
         int wait_elapsed = 0;
         const int max_wait_ms = 35000;
 
-        while (!block_ready && wait_elapsed < max_wait_ms && !_cancelled) {
+        while (!block_ready && wait_elapsed < max_wait_ms && !is_cancelled()) {
             uint8_t cmd_read[4] = { REQ_CODE_A, REQ_CODE_B, CMD_READ, 0x00 };
             if (!_io->send_cmd(cmd_read, 4)) {
                 std::cerr << "[-] Error: CMD_READ send failed" << std::endl;
@@ -445,7 +453,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
             }
         }
 
-        if (!block_ready || _cancelled) {
+        if (!block_ready || is_cancelled()) {
             break;
         }
 
@@ -454,7 +462,16 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
         int vert_lines = (resp_buf[8] << 8) | resp_buf[9];
         int horiz_pixels = (resp_buf[10] << 8) | resp_buf[11];
 
-        if (vert_lines <= 0 || blocklen == 0) {
+        // BUG-4 fix: cap blocklen to prevent std::bad_alloc crash on corrupted
+        // scanner responses. 64 MB is well above any real scan block size.
+        const uint32_t MAX_BLOCK_SIZE = 64u * 1024u * 1024u;
+        if (blocklen > MAX_BLOCK_SIZE) {
+            std::cerr << "[-] Warning: Implausible block size " << blocklen
+                      << " bytes — aborting block read loop." << std::endl;
+            break;
+        }
+
+        if (vert_lines <= 0 || horiz_pixels <= 0 || blocklen == 0) {
             if (final_block) break;
             usleep(20000);
             continue;
@@ -472,7 +489,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
         // Read bulk block data
         block_buffer.resize(blocklen);
         size_t total_received = 0;
-        while (total_received < blocklen && !_cancelled) {
+        while (total_received < blocklen && !is_cancelled()) {
             size_t chunk_to_read = std::min((size_t)(blocklen - total_received), (size_t)65536);
             size_t bytes_read = 0;
             if (!_io->read_bulk(block_buffer.data() + total_received, chunk_to_read, &bytes_read) || bytes_read == 0) {
@@ -481,7 +498,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
             total_received += bytes_read;
         }
 
-        if (total_received < blocklen && !_cancelled) {
+        if (total_received < blocklen && !is_cancelled()) {
             std::cerr << "[-] Warning: Incomplete block received (" << total_received << "/" << blocklen << ")" << std::endl;
         }
 
@@ -500,19 +517,19 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
         } else {
             // Uncompressed raw lines (Grayscale, LineArt, or uncompressed RGB)
             out_img.width = horiz_pixels;
-            int bytes_per_pixel = channels;
-            int raw_line_size = horiz_pixels * bytes_per_pixel;
+            if (horiz_pixels <= 0) break;
 
-            for (int y = 0; y < vert_lines; y++) {
-                size_t line_offset = (size_t)y * raw_line_size;
-                if (line_offset + raw_line_size > total_received) {
-                    break;
-                }
+            if (params.mode == ScanMode::Color && caps.line_order != 0) {
+                // Planar color bands per line: RRR... GGG... BBB...
+                size_t planar_line_size = (size_t)horiz_pixels * 3;
+                for (int y = 0; y < vert_lines; y++) {
+                    size_t line_offset = (size_t)y * planar_line_size;
+                    if (line_offset + planar_line_size > total_received ||
+                        line_offset + planar_line_size > block_buffer.size()) {
+                        break;
+                    }
 
-                const uint8_t *raw_line = block_buffer.data() + line_offset;
-
-                if (params.mode == ScanMode::Color && caps.line_order != 0) {
-                    // Planar color bands per line: RRR... GGG... BBB...
+                    const uint8_t *raw_line = block_buffer.data() + line_offset;
                     const uint8_t *r_band = raw_line;
                     const uint8_t *g_band = raw_line + horiz_pixels;
                     const uint8_t *b_band = raw_line + 2 * horiz_pixels;
@@ -522,10 +539,23 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
                         out_img.data.push_back(g_band[x]);
                         out_img.data.push_back(b_band[x]);
                     }
-                } else {
-                    out_img.data.insert(out_img.data.end(), raw_line, raw_line + raw_line_size);
+                    total_lines_scanned++;
                 }
-                total_lines_scanned++;
+            } else {
+                int bytes_per_pixel = channels;
+                size_t raw_line_size = (size_t)horiz_pixels * bytes_per_pixel;
+
+                for (int y = 0; y < vert_lines; y++) {
+                    size_t line_offset = (size_t)y * raw_line_size;
+                    if (line_offset + raw_line_size > total_received ||
+                        line_offset + raw_line_size > block_buffer.size()) {
+                        break;
+                    }
+
+                    const uint8_t *raw_line = block_buffer.data() + line_offset;
+                    out_img.data.insert(out_img.data.end(), raw_line, raw_line + raw_line_size);
+                    total_lines_scanned++;
+                }
             }
         }
 
@@ -539,7 +569,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
     out_img.height = total_lines_scanned;
 
     // Step 5: Release unit cleanly
-    if (_cancelled) {
+    if (is_cancelled()) {
         abort_and_release();
         std::cout << "[*] Scan cancelled by user." << std::endl;
         return false;

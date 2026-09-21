@@ -54,10 +54,13 @@ public:
     bool probe(ScannerCaps &caps);
     bool scan(const ScanParameters &params, ScannedImage &out_img, ScanProgressCallback progress_cb = nullptr);
     void cancel();
+    bool is_cancelled() const;
+    void set_cancel_flag(std::atomic<bool> *flag);
 
 private:
     ITransport *_io;
     std::atomic<bool> _cancelled;
+    std::atomic<bool> *_external_cancel;
 
     bool send_cmd_wait(uint8_t cmd_code, uint8_t *resp, size_t resplen, int timeout_sec = 10);
     bool abort_and_release();

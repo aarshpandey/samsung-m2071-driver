@@ -83,8 +83,9 @@ bool Algo0x11::_compress(const unsigned char *data, unsigned long size,
     unsigned long rawDataCounter = 0, rawDataCounterPtr=0, maxOutputSize;
     unsigned char *out;
 
-    // Create the output buffer
-    maxOutputSize = size;
+    // Create the output buffer (account for ~260 byte compression header)
+    const unsigned long maxHeaderSize = 4 + TABLE_PTR_SIZE * 2 + MAX_UNCOMPRESSED_BYTES;
+    maxOutputSize = size + maxHeaderSize;
     out = new unsigned char[maxOutputSize];
 
     // Print the table
@@ -97,6 +98,8 @@ bool Algo0x11::_compress(const unsigned char *data, unsigned long size,
     // Print the first uncompressed bytes
     if (uncompSize > MAX_UNCOMPRESSED_BYTES)
         uncompSize = MAX_UNCOMPRESSED_BYTES;
+    if (uncompSize > size)
+        uncompSize = size;
     *(uint32_t *)out = (uint32_t)uncompSize;
     for (r=0; r < uncompSize; r++, w++)
         out[w] = data[r];

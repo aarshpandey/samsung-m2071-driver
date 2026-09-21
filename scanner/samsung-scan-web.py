@@ -7,6 +7,7 @@ Zero external dependencies. Accessible via any browser (Safari, Chrome, etc.) on
 import os
 import sys
 import json
+import time
 import subprocess
 import tempfile
 import urllib.parse
@@ -33,6 +34,7 @@ def find_engine_bin():
 ENGINE_BIN = find_engine_bin()
 PORT = 8080
 
+LAST_SCAN_LOCK = threading.Lock()
 LAST_SCAN_PATH = None
 LAST_SCAN_MIME = "application/pdf"
 
@@ -394,12 +396,15 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(404, "No preview available")
 
         elif parsed.path == "/download":
-            if LAST_SCAN_PATH and os.path.exists(LAST_SCAN_PATH):
+            with LAST_SCAN_LOCK:
+                scan_path = LAST_SCAN_PATH
+                scan_mime = LAST_SCAN_MIME
+            if scan_path and os.path.exists(scan_path):
                 self.send_response(200)
-                self.send_header("Content-Type", LAST_SCAN_MIME)
-                self.send_header("Content-Disposition", f"attachment; filename={os.path.basename(LAST_SCAN_PATH)}")
+                self.send_header("Content-Type", scan_mime)
+                self.send_header("Content-Disposition", f"attachment; filename={os.path.basename(scan_path)}")
                 self.end_headers()
-                with open(LAST_SCAN_PATH, "rb") as f:
+                with open(scan_path, "rb") as f:
                     self.wfile.write(f.read())
             else:
                 self.send_error(404, "No scanned file available")
@@ -411,42 +416,75 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/scan":
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length)
-            params = json.loads(body.decode("utf-8"))
+            try:
+                params = json.loads(body.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_error(400, "Invalid JSON")
+                return
+
+            # VULN-2 fix: strict allowlists — reject anything not in these sets
+            ALLOWED_MODES = {"color", "gray", "lineart"}
+            ALLOWED_SIZES = {"a4", "letter", "legal"}
+            ALLOWED_FMTS  = {"pdf", "png", "jpg"}
+            ALLOWED_DPIS  = {75, 100, 150, 200, 300, 600, 1200}
 
             mode = params.get("mode", "color")
-            dpi = str(params.get("dpi", "300"))
             size = params.get("size", "a4")
-            fmt = params.get("format", "pdf")
-            is_preview = params.get("preview", False)
+            fmt  = params.get("format", "pdf")
+            is_preview = bool(params.get("preview", False))
 
-            out_file = tempfile.mktemp(suffix=f".{fmt}")
+            try:
+                dpi = int(params.get("dpi", 300))
+            except (TypeError, ValueError):
+                dpi = 300
+
+            # Reject invalid values immediately
+            if mode not in ALLOWED_MODES:
+                self.send_error(400, f"Invalid mode: {mode}")
+                return
+            if size not in ALLOWED_SIZES:
+                self.send_error(400, f"Invalid size: {size}")
+                return
+            if fmt not in ALLOWED_FMTS:
+                self.send_error(400, f"Invalid format: {fmt}")
+                return
+            if dpi not in ALLOWED_DPIS:
+                dpi = 300  # silently reset to safe default
+
+            # VULN-3 fix: use mkstemp (atomic, no race window) instead of mktemp
+            fd, out_file = tempfile.mkstemp(suffix=f".{fmt}")
+            os.close(fd)
+
             preview_png = "/tmp/samsung_web_preview.png"
 
-            cmd = [ENGINE_BIN, "-m", mode, "-d", dpi, "-s", size, "-o", out_file]
+            cmd = [ENGINE_BIN, "-m", mode, "-d", str(dpi), "-s", size, "-o", out_file]
 
             # Try direct hardware scan
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             if proc.returncode != 0:
                 # If scanner offline, use synthetic test pattern
-                demo_cmd = [ENGINE_BIN, "--test-pattern", "-m", mode, "-d", dpi, "-s", size, "-o", out_file]
+                demo_cmd = [ENGINE_BIN, "--test-pattern", "-m", mode, "-d", str(dpi), "-s", size, "-o", out_file]
                 proc = subprocess.run(demo_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             if proc.returncode == 0 and os.path.exists(out_file):
-                LAST_SCAN_PATH = out_file
                 if fmt == "pdf":
-                    LAST_SCAN_MIME = "application/pdf"
+                    mime = "application/pdf"
                 elif fmt == "png":
-                    LAST_SCAN_MIME = "image/png"
+                    mime = "image/png"
                 else:
-                    LAST_SCAN_MIME = "image/jpeg"
+                    mime = "image/jpeg"
+                with LAST_SCAN_LOCK:
+                    LAST_SCAN_PATH = out_file
+                    LAST_SCAN_MIME = mime
 
                 # Generate PNG preview for browser display
                 if fmt == "png":
                     subprocess.run(["cp", out_file, preview_png])
                 else:
                     subprocess.run(["/usr/bin/sips", "-s", "format", "png", out_file,
-                                    "--resampleWidth", "700", "--out", preview_png], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    "--resampleWidth", "700", "--out", preview_png],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -457,6 +495,7 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": proc.stderr}).encode("utf-8"))
+
 
 def run_server():
     server = HTTPServer(("localhost", PORT), ScanRequestHandler)

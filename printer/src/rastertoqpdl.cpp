@@ -49,7 +49,18 @@ int main(int argc, char **argv)
     title = argv[3];
     options = argv[5];
     file = argc == 7 ? argv[6] : NULL;
-    copies = strtol(argv[4], (char **)NULL, 10);
+    // BUG-7 fix: validate strtol return — a malformed copies field (non-numeric,
+    // zero, or overflow) would silently produce 0 copies; default to 1 instead.
+    {
+        char *end = nullptr;
+        errno = 0;
+        long raw_copies = strtol(argv[4], &end, 10);
+        if (errno != 0 || end == argv[4] || *end != '\0' || raw_copies <= 0) {
+            copies = 1;
+        } else {
+            copies = (unsigned long)raw_copies;
+        }
+    }
     ppdFile = getenv("PPD");
 
 

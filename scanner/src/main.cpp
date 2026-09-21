@@ -11,10 +11,12 @@
 #include <csignal>
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
 
+// Lock-free, async-signal-safe interruption flags.
 static std::atomic<bool> g_interrupted(false);
-static std::atomic<int> g_signal_count(0);
-static ScannerEngine *g_active_engine = nullptr;
+static std::atomic<int>  g_signal_count(0);
 
 static void handle_signal(int sig) {
     (void)sig;
@@ -22,10 +24,7 @@ static void handle_signal(int sig) {
     if (count >= 2) {
         _exit(1);
     }
-    g_interrupted = true;
-    if (g_active_engine) {
-        g_active_engine->cancel();
-    }
+    g_interrupted.store(true, std::memory_order_relaxed);
 }
 
 static void show_help(const char *prog) {
@@ -57,6 +56,7 @@ static void generate_test_pattern(const ScanParameters &params, ScannedImage &ou
     out_img.height = h;
     out_img.dpi = dpi;
     out_img.channels = (params.mode == ScanMode::Color) ? 3 : 1;
+    out_img.bits_per_channel = (params.mode == ScanMode::LineArt) ? 1 : 8;
     out_img.data.resize(w * h * out_img.channels, 255);
 
     // Draw header box and gradients
@@ -94,6 +94,12 @@ static void generate_test_pattern(const ScanParameters &params, ScannedImage &ou
             }
         }
     }
+
+    if (params.mode == ScanMode::LineArt) {
+        for (size_t i = 0; i < out_img.data.size(); i++) {
+            out_img.data[i] = (out_img.data[i] >= 128) ? 1 : 0;
+        }
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -116,7 +122,14 @@ int main(int argc, char *argv[]) {
             else if (m == "lineart" || m == "bw") params.mode = ScanMode::LineArt;
             else params.mode = ScanMode::Color;
         } else if ((arg == "-d" || arg == "--dpi") && i + 1 < argc) {
-            params.dpi = std::atoi(argv[++i]);
+            int d = std::atoi(argv[++i]);
+            if (d == 75 || d == 100 || d == 150 || d == 200 || d == 300 || d == 600 || d == 1200) {
+                params.dpi = d;
+            } else {
+                std::cerr << "[-] Warning: Unsupported DPI " << d
+                          << ". Allowed: 75, 100, 150, 200, 300, 600, 1200. Defaulting to 300 DPI." << std::endl;
+                params.dpi = 300;
+            }
         } else if ((arg == "-s" || arg == "--size") && i + 1 < argc) {
             std::string s = argv[++i];
             if (s == "letter") {
@@ -149,9 +162,12 @@ int main(int argc, char *argv[]) {
             std::cout << "Tip: Ensure the scanner is plugged in and turned on via USB." << std::endl;
         } else {
             for (size_t i = 0; i < devices.size(); i++) {
+                char vid_buf[8], pid_buf[8];
+                std::snprintf(vid_buf, sizeof(vid_buf), "%04x", devices[i].vid);
+                std::snprintf(pid_buf, sizeof(pid_buf), "%04x", devices[i].pid);
                 std::cout << "[" << (i + 1) << "] " << devices[i].manufacturer << " "
-                          << devices[i].product << " (VID: 0x" << std::hex << devices[i].vid
-                          << " PID: 0x" << devices[i].pid << std::dec
+                          << devices[i].product << " (VID: 0x" << vid_buf
+                          << " PID: 0x" << pid_buf
                           << ", Bus: " << (int)devices[i].bus << ", Addr: " << (int)devices[i].address << ")\n";
             }
         }
@@ -199,15 +215,22 @@ int main(int argc, char *argv[]) {
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
 
-    ScannerEngine engine(transport.get());
-    g_active_engine = &engine;
+    auto engine = std::make_shared<ScannerEngine>(transport.get());
+    engine->set_cancel_flag(&g_interrupted);
 
-    // Background listener for CANCEL on stdin from GUI
-    std::thread stdin_thread([&engine]() {
+    // Background listener for CANCEL on stdin from GUI.
+    // Captures a weak_ptr so if the scan completes and engine is destroyed,
+    // subsequent input on stdin will safely no-op without use-after-free.
+    std::weak_ptr<ScannerEngine> weak_engine = engine;
+    auto stdin_stop = std::make_shared<std::atomic<bool>>(false);
+
+    std::thread stdin_thread([weak_engine, stdin_stop]() {
         std::string line;
-        while (std::getline(std::cin, line)) {
+        while (!stdin_stop->load() && std::getline(std::cin, line)) {
             if (line == "CANCEL" || line == "cancel" || line == "STOP" || line == "abort") {
-                engine.cancel();
+                if (auto eng = weak_engine.lock()) {
+                    eng->cancel();
+                }
                 break;
             }
         }
@@ -226,8 +249,10 @@ int main(int argc, char *argv[]) {
     std::cout << "[*] Initializing scan (Mode: " << (params.mode == ScanMode::Color ? "Color" : "Grayscale")
               << ", DPI: " << params.dpi << ", Size: " << params.width_mm << "x" << params.length_mm << " mm)..." << std::endl;
 
-    bool success = engine.scan(params, img, progress_cb);
-    g_active_engine = nullptr;
+    bool success = engine->scan(params, img, progress_cb);
+
+    stdin_stop->store(true);
+    engine.reset();
 
     if (!success) {
         if (json_progress) {
@@ -235,7 +260,7 @@ int main(int argc, char *argv[]) {
         } else {
             std::cerr << "\n[-] Scan aborted by user." << std::endl;
         }
-        return 2; // return distinct code for cancellation
+        return 2;
     }
     std::cout << std::endl;
 

@@ -21,9 +21,23 @@
 #include "printer.h"
 #include <time.h>
 #include <string.h>
+#include <string>
 #include "errlog.h"
 #include "request.h"
 #include "ppdfile.h"
+
+// BUG-8 fix: Strip characters that could break out of a PJL quoted string.
+// Removes double-quotes, newlines, and carriage-returns from user-supplied
+// strings (job title, user name) before embedding them in PJL output.
+static std::string sanitize_pjl(const char *src) {
+    if (!src) return "";
+    std::string out;
+    for (const char *p = src; *p; ++p) {
+        if (*p == '"' || *p == '\n' || *p == '\r') continue;
+        out += *p;
+    }
+    return out;
+}
 
 
 
@@ -199,17 +213,21 @@ bool Printer::sendPJLHeader(const Request& request,
 
     printf("%s", _beginPJL);
 
+    // BUG-8 fix: sanitize user-supplied strings before embedding in PJL
+    std::string safe_user  = sanitize_pjl(request.userName());
+    std::string safe_title = sanitize_pjl(request.jobTitle());
+
     if (0x15 == compression) {
-        printf("@PJL COMMENT USERNAME=\"Username: %s\"\n", request.userName());
-        printf("@PJL COMMENT DOCNAME=\"%s\"\n", request.jobTitle());
-        printf("@PJL JOB NAME=\"%s\"\n", request.jobTitle());
+        printf("@PJL COMMENT USERNAME=\"Username: %s\"\n", safe_user.c_str());
+        printf("@PJL COMMENT DOCNAME=\"%s\"\n", safe_title.c_str());
+        printf("@PJL JOB NAME=\"%s\"\n", safe_title.c_str());
     }
 
     // Information about the job
     printf("@PJL DEFAULT SERVICEDATE=%04u%02u%02u\n", 1900+timeinfo->tm_year,
         timeinfo->tm_mon+1, timeinfo->tm_mday);
-    printf("@PJL SET USERNAME=\"%s\"\n", request.userName());
-    printf("@PJL SET JOBNAME=\"%s\"\n", request.jobTitle());
+    printf("@PJL SET USERNAME=\"%s\"\n", safe_user.c_str());
+    printf("@PJL SET JOBNAME=\"%s\"\n", safe_title.c_str());
 
     if (0x15 == compression)
         printf("@PJL SET MULTIBINMODE=%s\n", "PRINTERDEFAULT");

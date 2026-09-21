@@ -121,6 +121,28 @@ void Page::flushPlanes()
  * Mise sur disque / Rechargement
  * Swapping / restoring
  */
+static bool safe_write(int fd, const void *buf, size_t count) {
+    const char *p = (const char *)buf;
+    while (count > 0) {
+        ssize_t ret = write(fd, p, count);
+        if (ret <= 0) return false;
+        p += ret;
+        count -= (size_t)ret;
+    }
+    return true;
+}
+
+static bool safe_read(int fd, void *buf, size_t count) {
+    char *p = (char *)buf;
+    while (count > 0) {
+        ssize_t ret = read(fd, p, count);
+        if (ret <= 0) return false;
+        p += ret;
+        count -= (size_t)ret;
+    }
+    return true;
+}
+
 bool Page::swapToDisk(int fd)
 {
     unsigned long i;
@@ -131,22 +153,25 @@ bool Page::swapToDisk(int fd)
             "representation"));
         return false;
     }
-    write(fd, &_xResolution, sizeof(_xResolution));
-    write(fd, &_yResolution, sizeof(_yResolution));
-    write(fd, &_width, sizeof(_width));
-    write(fd, &_height, sizeof(_height));
-    write(fd, &_colors, sizeof(_colors));
-    write(fd, &_pageNr, sizeof(_pageNr));
-    write(fd, &_copiesNr, sizeof(_copiesNr));
-    write(fd, &_compression, sizeof(_compression));
-    write(fd, &_empty, sizeof(_empty));
-    write(fd, &_bandsNr, sizeof(_bandsNr));
+    if (!safe_write(fd, &_xResolution, sizeof(_xResolution)) ||
+        !safe_write(fd, &_yResolution, sizeof(_yResolution)) ||
+        !safe_write(fd, &_width, sizeof(_width)) ||
+        !safe_write(fd, &_height, sizeof(_height)) ||
+        !safe_write(fd, &_colors, sizeof(_colors)) ||
+        !safe_write(fd, &_pageNr, sizeof(_pageNr)) ||
+        !safe_write(fd, &_copiesNr, sizeof(_copiesNr)) ||
+        !safe_write(fd, &_compression, sizeof(_compression)) ||
+        !safe_write(fd, &_empty, sizeof(_empty)) ||
+        !safe_write(fd, &_bandsNr, sizeof(_bandsNr)))
+        return false;
     /* Carefully check if there is BIH data and compression type is 0x15,
        before saving BIH data to file. */
-    if (( 0x15 == _compression ) && ( _bandsNr > 0 ) && ( NULL != _bih ))
-        write(fd, _bih, 20);
+    if (( 0x15 == _compression ) && ( _bandsNr > 0 ) && ( NULL != _bih )) {
+        if (!safe_write(fd, _bih, 20))
+            return false;
+    }
     for (i=0, band = _firstBand; i < _bandsNr; i++) {
-        if (!band->swapToDisk(fd))
+        if (!band || !band->swapToDisk(fd))
             return false;
         band = band->sibling();
     }
@@ -160,21 +185,27 @@ Page* Page::restoreIntoMemory(int fd)
     Page* page;
 
     page = new Page();
-    read(fd, &page->_xResolution, sizeof(page->_xResolution));
-    read(fd, &page->_yResolution, sizeof(page->_yResolution));
-    read(fd, &page->_width, sizeof(page->_width));
-    read(fd, &page->_height, sizeof(page->_height));
-    read(fd, &page->_colors, sizeof(page->_colors));
-    read(fd, &page->_pageNr, sizeof(page->_pageNr));
-    read(fd, &page->_copiesNr, sizeof(page->_copiesNr));
-    read(fd, &page->_compression, sizeof(page->_compression));
-    read(fd, &page->_empty, sizeof(page->_empty));
-    read(fd, &nr, sizeof(nr));
+    if (!safe_read(fd, &page->_xResolution, sizeof(page->_xResolution)) ||
+        !safe_read(fd, &page->_yResolution, sizeof(page->_yResolution)) ||
+        !safe_read(fd, &page->_width, sizeof(page->_width)) ||
+        !safe_read(fd, &page->_height, sizeof(page->_height)) ||
+        !safe_read(fd, &page->_colors, sizeof(page->_colors)) ||
+        !safe_read(fd, &page->_pageNr, sizeof(page->_pageNr)) ||
+        !safe_read(fd, &page->_copiesNr, sizeof(page->_copiesNr)) ||
+        !safe_read(fd, &page->_compression, sizeof(page->_compression)) ||
+        !safe_read(fd, &page->_empty, sizeof(page->_empty)) ||
+        !safe_read(fd, &nr, sizeof(nr))) {
+        delete page;
+        return NULL;
+    }
     /* Check if compression type is 0x15 and that there is at least one
        image band before reading BIH data. */
     if (( 0x15 == page->_compression ) && ( nr > 0 )) {
         unsigned char bih[20];
-        read(fd, bih, 20);
+        if (!safe_read(fd, bih, 20)) {
+            delete page;
+            return NULL;
+        }
         page->setBIH(bih);
     }
     for (unsigned int i=0; i < nr; i++) {
