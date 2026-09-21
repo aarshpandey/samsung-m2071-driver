@@ -58,13 +58,16 @@ chown root:wheel "$PPD_DEST_DIR/Samsung-Xpress-M2071.ppd" "$PPD_DEST_DIR/Samsung
 chmod 644 "$PPD_DEST_DIR/Samsung-Xpress-M2071.ppd" "$PPD_DEST_DIR/Samsung-Xpress-M2070.ppd"
 
 # Validate installed PPD
-cupstestppd -q "$PPD_DEST_DIR/Samsung-Xpress-M2071.ppd" && echo "    [✓] Samsung-Xpress-M2071.ppd: Conformance PASS"
-cupstestppd -q "$PPD_DEST_DIR/Samsung-Xpress-M2070.ppd" && echo "    [✓] Samsung-Xpress-M2070.ppd: Conformance PASS"
+cupstestppd -q "$PPD_DEST_DIR/Samsung-Xpress-M2071.ppd" && echo "    [✓] Samsung-Xpress-M2071.ppd: Conformance PASS" || true
+cupstestppd -q "$PPD_DEST_DIR/Samsung-Xpress-M2070.ppd" && echo "    [✓] Samsung-Xpress-M2070.ppd: Conformance PASS" || true
 
 # Step 4: Refresh CUPS daemon
 echo "==> [4/5] Refreshing CUPS printing subsystem..."
 launchctl kickstart -k system/org.cups.cupsd 2>/dev/null || killall -HUP cupsd 2>/dev/null || true
-sleep 1
+for i in {1..10}; do
+    lpstat -r 2>/dev/null | grep -q "running" && break
+    sleep 1
+done
 
 # Step 5: Check for connected USB Samsung printer & configure queue
 echo "==> [5/5] Checking for connected Samsung USB hardware..."
@@ -73,16 +76,26 @@ DETECTED_URI=$(lpinfo -v 2>/dev/null | grep -E "Samsung.*(207|M20|Printer|Laser)
 if [ -n "$DETECTED_URI" ]; then
     echo "    Found printer at URI: $DETECTED_URI"
     PRINTER_NAME="Samsung_Xpress_M2071"
-    lpadmin -p "$PRINTER_NAME" \
+    PPD_FILE="Samsung-Xpress-M2071.ppd"
+    DESC_NAME="Samsung Xpress M2071 (Apple Silicon)"
+    if echo "$DETECTED_URI" | grep -qi "2070"; then
+        PRINTER_NAME="Samsung_Xpress_M2070"
+        PPD_FILE="Samsung-Xpress-M2070.ppd"
+        DESC_NAME="Samsung Xpress M2070 (Apple Silicon)"
+    fi
+    if lpadmin -p "$PRINTER_NAME" \
             -E \
             -v "$DETECTED_URI" \
-            -P "$PPD_DEST_DIR/Samsung-Xpress-M2071.ppd" \
-            -D "Samsung Xpress M2071 (Apple Silicon)" \
-            -L "Local USB"
-    cupsenable "$PRINTER_NAME" 2>/dev/null || true
-    cupsaccept "$PRINTER_NAME" 2>/dev/null || true
-    lpadmin -d "$PRINTER_NAME" 2>/dev/null || true
-    echo "    [✓] Configured print queue '$PRINTER_NAME' and set as default!"
+            -P "$PPD_DEST_DIR/$PPD_FILE" \
+            -D "$DESC_NAME" \
+            -L "Local USB"; then
+        cupsenable "$PRINTER_NAME" 2>/dev/null || true
+        cupsaccept "$PRINTER_NAME" 2>/dev/null || true
+        lpadmin -d "$PRINTER_NAME" 2>/dev/null || true
+        echo "    [✓] Configured print queue '$PRINTER_NAME' and set as default!"
+    else
+        echo "    [!] Failed to configure print queue. You can add it manually in System Settings."
+    fi
 else
     echo "    Note: No Samsung USB printer currently plugged in."
     echo "    macOS will automatically offer this driver when the printer is connected."

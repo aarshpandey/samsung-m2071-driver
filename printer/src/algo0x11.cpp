@@ -173,10 +173,14 @@ bool Algo0x11::_compress(const unsigned char *data, unsigned long size,
             out[rawDataCounterPtr] = 0x7F;
             rawDataCounter = 0;
         }
+        if (w >= maxOutputSize) {
+            w++; // Ensure we break with error condition
+            break;
+        }
         out[w] = data[r];
         w++;
         r++;
-    } while (w < maxOutputSize);
+    } while (r < size && w < maxOutputSize);
 
     // Does the compression finished without any error?
     if (w >= maxOutputSize) {

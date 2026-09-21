@@ -127,7 +127,13 @@ if [ -n "$OUTPUT_FILE" ]; then
     trap 'rm -f "$TMP_RASTER"' EXIT
 
     # Convert document to CUPS raster using macOS CoreGraphics pipeline
-    cupsfilter -m application/vnd.cups-raster -p "$ACTIVE_PPD" "$INPUT_FILE" > "$TMP_RASTER" 2>/dev/null
+    if ! cupsfilter -m application/vnd.cups-raster -p "$ACTIVE_PPD" "$INPUT_FILE" > "$TMP_RASTER" 2>/tmp/samsung_cupsfilter.err; then
+        echo "Error: cupsfilter failed to process the document:" >&2
+        cat /tmp/samsung_cupsfilter.err >&2
+        rm -f /tmp/samsung_cupsfilter.err
+        exit 1
+    fi
+    rm -f /tmp/samsung_cupsfilter.err
     
     # Run the native ARM64 QPDL filter
     PPD="$ACTIVE_PPD" "$ACTIVE_FILTER" 1 "$USER" "$(basename "$INPUT_FILE")" "$COPIES" "" "$TMP_RASTER" > "$OUTPUT_FILE"

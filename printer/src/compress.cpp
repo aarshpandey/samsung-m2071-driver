@@ -221,21 +221,22 @@ static bool _compressBandedPage(const Request& request, Page* page)
             }
 
             // Copy the data into the band depending on the algorithm options
+            unsigned int safeLimit = (lineWidthInB > hardMarginXInB) ? (lineWidthInB - hardMarginXInB) : 0;
             if (algo->reverseLineColumn()) {
                 for (unsigned int y=0; y < localHeight; y++) {
-                    for (unsigned int x=0; (x < lineWidthInB - hardMarginXInB) && (x < bandWidthInB); x++) {
+                    for (unsigned int x=0; (x < safeLimit) && (x < bandWidthInB); x++) {
                         band[x * bandHeight + y] = planes[i][index + x + hardMarginXInB + y * lineWidthInB]; // ERR?
                     }
-                    for (unsigned int x=lineWidthInB - hardMarginXInB; x < bandWidthInB; x++)
+                    for (unsigned int x=safeLimit; x < bandWidthInB; x++)
                         band[x * bandHeight + y] = 0;
                 }
             } else {
                 for (unsigned int y=0; y < localHeight; y++) {
-                    for (unsigned int x=0; (x < lineWidthInB - hardMarginXInB) && (x < bandWidthInB); x++) {
+                    for (unsigned int x=0; (x < safeLimit) && (x < bandWidthInB); x++) {
                         band[x + y * bandWidthInB] = planes[i][index + x + hardMarginXInB + y * lineWidthInB];
                     }
                     // BUG-1 fix: row stride must be bandWidthInB, not lineWidthInB
-                    for (unsigned int x=lineWidthInB - hardMarginXInB; x < bandWidthInB; x++)
+                    for (unsigned int x=safeLimit; x < bandWidthInB; x++)
                         band[x + y * bandWidthInB] = 0;
                 }
             }
@@ -332,10 +333,11 @@ static bool _compressBandedJBIGPage(const Request& request, Page* page)
        width varies and can lead to 6 practical cases, the following is a
        condensed code.
     */
-    if (hardMarginXInB + bufferWidthInB < lineWidthInB - hardMarginXInB)
+    unsigned long safeLineWidthInB = (lineWidthInB > hardMarginXInB) ? (lineWidthInB - hardMarginXInB) : 0;
+    if (hardMarginXInB + bufferWidthInB < safeLineWidthInB)
         xLimitInB = hardMarginXInB + bufferWidthInB;
     else
-        xLimitInB = lineWidthInB - hardMarginXInB;
+        xLimitInB = safeLineWidthInB;
     bool theEnd = false;
     unsigned long indexSizeIncrement = bandHeight * lineWidthInB;
     unsigned long localHeight = bandHeight;
@@ -349,12 +351,13 @@ static bool _compressBandedJBIGPage(const Request& request, Page* page)
             for (unsigned int i=0; i < page->colorsNr(); i++)
                 memset(band[i], 0, bandSize);
         }
+        unsigned long safeZeroStart = (lineWidthInB > 2 * hardMarginXInB) ? (lineWidthInB - 2 * hardMarginXInB) : 0;
         for (unsigned int i=0; i < page->colorsNr(); i++) {
             for (unsigned int y=0; y < localHeight; y++) {
                 for (unsigned int x=hardMarginXInB; x < xLimitInB; x++)
                     band[i][x - hardMarginXInB + y * bufferWidthInB] =
                              planes[i][index + x + y * lineWidthInB];
-                for (unsigned int x=lineWidthInB - 2 * hardMarginXInB;
+                for (unsigned int x=safeZeroStart;
                                   x < bufferWidthInB; x++)
                     band[i][x + y * bufferWidthInB] = 0;
             }

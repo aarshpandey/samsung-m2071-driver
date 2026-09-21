@@ -37,6 +37,7 @@ PORT = 8080
 LAST_SCAN_LOCK = threading.Lock()
 LAST_SCAN_PATH = None
 LAST_SCAN_MIME = "application/pdf"
+LAST_PREVIEW_PATH = None
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -385,8 +386,9 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/preview":
             # Return preview image (PNG)
-            preview_png = "/tmp/samsung_web_preview.png"
-            if os.path.exists(preview_png):
+            with LAST_SCAN_LOCK:
+                preview_png = LAST_PREVIEW_PATH
+            if preview_png and os.path.exists(preview_png):
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
                 self.end_headers()
@@ -455,7 +457,8 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
             fd, out_file = tempfile.mkstemp(suffix=f".{fmt}")
             os.close(fd)
 
-            preview_png = "/tmp/samsung_web_preview.png"
+            fd_prev, preview_png = tempfile.mkstemp(suffix=".png")
+            os.close(fd_prev)
 
             cmd = [ENGINE_BIN, "-m", mode, "-d", str(dpi), "-s", size, "-o", out_file]
 
@@ -474,9 +477,6 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
                     mime = "image/png"
                 else:
                     mime = "image/jpeg"
-                with LAST_SCAN_LOCK:
-                    LAST_SCAN_PATH = out_file
-                    LAST_SCAN_MIME = mime
 
                 # Generate PNG preview for browser display
                 if fmt == "png":
@@ -485,6 +485,12 @@ class ScanRequestHandler(BaseHTTPRequestHandler):
                     subprocess.run(["/usr/bin/sips", "-s", "format", "png", out_file,
                                     "--resampleWidth", "700", "--out", preview_png],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                global LAST_SCAN_PATH, LAST_SCAN_MIME, LAST_PREVIEW_PATH
+                with LAST_SCAN_LOCK:
+                    LAST_SCAN_PATH = out_file
+                    LAST_SCAN_MIME = mime
+                    LAST_PREVIEW_PATH = preview_png
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")

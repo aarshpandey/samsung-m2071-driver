@@ -75,9 +75,16 @@ launchctl kickstart -k system/org.cups.cupsd 2>/dev/null || killall -HUP cupsd 2
 DETECTED_URI=$(lpinfo -v 2>/dev/null | grep -E "Samsung.*(207|M20|Printer|Laser)" | awk '{print $2}' | head -n 1 || true)
 if [ -n "$DETECTED_URI" ]; then
     PRINTER_NAME="Samsung_Xpress_M2071"
+    PPD_NAME="Samsung-Xpress-M2071.ppd"
+    DESC_NAME="Samsung Xpress M2071 (Apple Silicon)"
+    if echo "$DETECTED_URI" | grep -qi "2070"; then
+        PRINTER_NAME="Samsung_Xpress_M2070"
+        PPD_NAME="Samsung-Xpress-M2070.ppd"
+        DESC_NAME="Samsung Xpress M2070 (Apple Silicon)"
+    fi
     lpadmin -p "$PRINTER_NAME" -E -v "$DETECTED_URI" \
-            -P "$PPD_DIR/Samsung-Xpress-M2071.ppd" \
-            -D "Samsung Xpress M2071 (Apple Silicon)" \
+            -P "$PPD_DIR/$PPD_NAME" \
+            -D "$DESC_NAME" \
             -L "Local USB" 2>/dev/null || true
     cupsenable "$PRINTER_NAME" 2>/dev/null || true
     cupsaccept "$PRINTER_NAME" 2>/dev/null || true

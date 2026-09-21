@@ -308,7 +308,8 @@ public class ScannerViewModel: ObservableObject {
         
         let outPipe = Pipe()
         process.standardOutput = outPipe
-        process.standardError = Pipe()
+        // Do not create an unread Pipe for stderr; use null device or omit to avoid deadlock.
+        process.standardError = FileHandle.nullDevice
         
         let fileHandle = outPipe.fileHandleForReading
         fileHandle.readabilityHandler = { [weak self] handle in
@@ -337,6 +338,9 @@ public class ScannerViewModel: ObservableObject {
         }
         
         Task.detached {
+            defer {
+                try? FileManager.default.removeItem(atPath: tempPNG)
+            }
             do {
                 try process.run()
                 process.waitUntilExit()
@@ -430,7 +434,11 @@ public class ScannerViewModel: ObservableObject {
         
         // 1. Send CANCEL command on stdin to tell engine to abort hardware
         if let inPipe = activeInputPipe {
-            inPipe.fileHandleForWriting.write(Data("CANCEL\n".utf8))
+            do {
+                try inPipe.fileHandleForWriting.write(contentsOf: Data("CANCEL\n".utf8))
+            } catch {
+                print("Failed to send CANCEL: \(error)")
+            }
         }
         
         // 2. Also send SIGINT (Ctrl+C) to trigger signal handler in engine

@@ -340,7 +340,7 @@ bool ScannerEngine::scan(const ScanParameters &params, ScannedImage &out_img, Sc
     }
 
     uint8_t cmd_win[25] = {
-        REQ_CODE_A, REQ_CODE_B, CMD_SET_WINDOW, 0x13, MSG_SCANNING_PARAM,
+        REQ_CODE_A, REQ_CODE_B, CMD_SET_WINDOW, 0x15, MSG_SCANNING_PARAM,
         (uint8_t)(win_width >> 24),
         (uint8_t)(win_width >> 16),
         (uint8_t)(win_width >> 8),

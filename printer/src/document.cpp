@@ -112,21 +112,23 @@ Page* Document::getNextRawPage(const Request& request)
     page->setCopiesNr(header.NumCopies);
 
     // Calculate clippings and margins
-    if (lineSize > pageWidthInB - 2 * marginWidthInB) {
-        clippingX = (lineSize - (pageWidthInB - 2 * marginWidthInB)) / 2;
-        bytesToCopy = pageWidthInB - 2 * marginWidthInB;
+    unsigned long safeWidthLimit = (pageWidthInB > 2 * marginWidthInB) ? (pageWidthInB - 2 * marginWidthInB) : 0;
+    if (lineSize > safeWidthLimit) {
+        clippingX = (lineSize - safeWidthLimit) / 2;
+        bytesToCopy = safeWidthLimit;
     } else {
         clippingX = 0;
-        marginWidthInB = (pageWidthInB - lineSize) / 2;
+        marginWidthInB = (pageWidthInB > lineSize) ? (pageWidthInB - lineSize) / 2 : 0;
         bytesToCopy = lineSize;
     }
 
-    if (documentHeight > pageHeight - 2 * marginHeight) {
-        clippingY = (documentHeight - (pageHeight - 2 * marginHeight)) / 2;
+    unsigned long safeHeightLimit = (pageHeight > 2 * marginHeight) ? (pageHeight - 2 * marginHeight) : 0;
+    if (documentHeight > safeHeightLimit) {
+        clippingY = (documentHeight - safeHeightLimit) / 2;
         index = pageWidthInB * marginHeight;
     } else {
         clippingY = 0;
-        index = pageWidthInB * ((pageHeight - documentHeight)/2);
+        index = pageWidthInB * ((pageHeight > documentHeight) ? (pageHeight - documentHeight)/2 : 0);
     }
     documentHeight -= clippingY;
     pageHeight -= 2*marginHeight;
