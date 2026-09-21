@@ -4,7 +4,7 @@
 
 CXX ?= clang++
 ARCH ?= -arch arm64
-CXXFLAGS ?= -O3 -std=c++14 $(ARCH) -Iinclude -DDISABLE_JBIG=1 -DVERSION=\"2.0.2-arm64\" -DCACHESIZE=30 -DTHREADS=2 -Wall -Wno-deprecated-declarations
+CXXFLAGS ?= -O3 -std=c++14 $(ARCH) -Iinclude -DDISABLE_JBIG=1 -DVERSION=\"1.0.2-arm64\" -DCACHESIZE=30 -DTHREADS=2 -Wall -Wno-deprecated-declarations
 LDFLAGS ?= $(ARCH) -lcups
 
 SRCS = src/algo0x0d.cpp \

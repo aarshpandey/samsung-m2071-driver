@@ -2,7 +2,7 @@
 *%%%% PPD file for Samsung Xpress M2070 Series with CUPS.
 *%%%% Created for macOS Apple Silicon (arm64).
 *FormatVersion: "4.3"
-*FileVersion: "2.0.0"
+*FileVersion: "1.0.2"
 *LanguageVersion: English
 *LanguageEncoding: ISOLatin1
 *PCFileName: "M2070.PPD"

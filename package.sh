@@ -97,7 +97,7 @@ chmod 755 "$PRINTER_SCRIPTS/postinstall"
 pkgbuild --root "$PRINTER_ROOT" \
          --scripts "$PRINTER_SCRIPTS" \
          --identifier "com.samsung.driver.m2071.printer" \
-         --version "2.0.2" \
+         --version "1.0.2" \
          --install-location "/" \
          "$DIST_DIR/Samsung-Xpress-Printer-Driver.pkg"
 
@@ -152,7 +152,7 @@ chmod 755 "$SCANNER_SCRIPTS/postinstall"
 pkgbuild --root "$SCANNER_ROOT" \
          --scripts "$SCANNER_SCRIPTS" \
          --identifier "com.samsung.driver.m2071.scanner" \
-         --version "1.0.0" \
+         --version "1.0.2" \
          --install-location "/" \
          "$DIST_DIR/Samsung-Scanner-Suite.pkg"
 

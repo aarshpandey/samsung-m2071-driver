@@ -21,9 +21,9 @@
 #ifndef _VERSION_H_
 #define _VERSION_H_
 
-#define PPDVERSION "2.0.0"
+#define PPDVERSION "1.0.2"
 #ifndef VERSION
-#define VERSION "2.0.2-arm64"
+#define VERSION "1.0.2-arm64"
 #endif
 
 #endif /* _VERSION_H_ */
